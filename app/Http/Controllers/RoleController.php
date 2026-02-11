@@ -9,9 +9,7 @@ use Illuminate\Support\Facades\Validator;
 
 class RoleController extends Controller
 {
-    /**
-     * Get all roles (Super Admin only)
-     */
+
     public function index(Request $request)
     {
         $user = $request->user();

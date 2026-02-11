@@ -51,12 +51,23 @@ class AnnotationController extends Controller
         $validated['assigned_by'] = auth()->id();
     }
 
-    $space = $floorplan->spaces()->create($validated);
+    try {
+        $space = $floorplan->spaces()->create($validated);
 
-    return response()->json([
-        'message' => 'Space created successfully',
-        'data' => $space
-    ]);
+        return response()->json([
+            'message' => 'Space created successfully',
+            'data' => $space
+        ]);
+    } catch (\Illuminate\Database\QueryException $e) {
+        // Handle duplicate entry error
+        if ($e->getCode() === '23000' || str_contains($e->getMessage(), 'Duplicate entry')) {
+            return response()->json([
+                'status' => false,
+                'message' => "This room number '{$validated['number']}' is already added!"
+            ], 422);
+        }
+        throw $e;
+    }
 }
 
    public function updateSpace(Request $request, $projectId, $floorplanId, $spaceId)
@@ -94,12 +105,23 @@ class AnnotationController extends Controller
     // Optionally update assigned_by if you want to track who updated
     $validated['assigned_by'] = auth()->id();
 
-    $space->update($validated);
+    try {
+        $space->update($validated);
 
-    return response()->json([
-        'message' => 'Space updated successfully',
-        'data' => $space
-    ]);
+        return response()->json([
+            'message' => 'Space updated successfully',
+            'data' => $space
+        ]);
+    } catch (\Illuminate\Database\QueryException $e) {
+        // Handle duplicate entry error
+        if ($e->getCode() === '23000' || str_contains($e->getMessage(), 'Duplicate entry')) {
+            return response()->json([
+                'status' => false,
+                'message' => "This room number '{$validated['number']}' is already added!"
+            ], 422);
+        }
+        throw $e;
+    }
 }
 
 
