@@ -24,7 +24,7 @@ class CreatedByAdminNotification extends Notification
 
     public function toMail($notifiable)
     {
-        $frontend = env('APP_URL', 'http://localhost:5173');
+        $frontend = env('APP_URL', 'https://katchap.com');
         return (new MailMessage)
             ->subject('Account Created')
             ->line('An admin created an account for you.')

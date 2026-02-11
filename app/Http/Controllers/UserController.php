@@ -185,7 +185,7 @@ class UserController extends Controller
         $status = Password::sendResetLink(
             ['email' => $user->email],
             function ($user, $token) {
-                $resetUrl = "http://localhost:5173/reset-password?token={$token}&email={$user->email}";
+                $resetUrl = "https://katchap.com/reset-password?token={$token}&email={$user->email}";
 
                 Mail::send([], [], function ($message) use ($user, $resetUrl) {
                     $message->to($user->email)

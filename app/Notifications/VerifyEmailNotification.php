@@ -34,7 +34,7 @@ class VerifyEmailNotification extends Notification
     public function toMail(object $notifiable): MailMessage
     {
         \Log::info('Building email for: ' . $notifiable->email);
-        $frontendUrl = env('APP_URL', 'http://localhost:5173');
+        $frontendUrl = env('APP_URL', 'https://katchap.com');
         $verificationUrl = $frontendUrl . '/email-verify?id=' . $notifiable->getKey() . '&hash=' . sha1($notifiable->getEmailForVerification());
 
         return (new MailMessage)
