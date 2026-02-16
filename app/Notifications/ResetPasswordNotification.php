@@ -44,7 +44,7 @@ class ResetPasswordNotification extends Notification
     public function toMail($notifiable)
     {
         // Use APP_URL from .env (your frontend URL)
-        $frontendUrl = env('APP_URL', 'https://katchap.com');
+        $frontendUrl = env('APP_URL', 'http://katchap.com');
 
         // Full reset URL
         $url = $frontendUrl . '/reset-password?token=' . $this->token . '&email=' . $notifiable->email;

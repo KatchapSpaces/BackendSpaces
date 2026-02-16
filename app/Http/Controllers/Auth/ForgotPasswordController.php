@@ -19,7 +19,7 @@ class ForgotPasswordController extends Controller
         $status = Password::sendResetLink(
             $request->only('email'),
             function ($user, $token) {
-                $resetUrl = "https://katchap.com/reset-password?token={$token}&email={$user->email}";
+                $resetUrl = "http://katchap.com/reset-password?token={$token}&email={$user->email}";
 
                 Mail::send([], [], function ($message) use ($user, $resetUrl) {
                     $message->to($user->email)

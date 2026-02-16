@@ -12,6 +12,7 @@ class Project extends Model
     protected $fillable = [
         'title',
         'description',
+        'revision',
         'site_number',
         'timezone',
         'address',

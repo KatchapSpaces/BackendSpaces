@@ -254,6 +254,7 @@ class ProjectController extends Controller
 
         $request->validate([
             'title'       => 'required|string|max:255',
+            'revision'    => 'nullable|string|max:100',
             'image'       => 'nullable|image',
             'drawings'    => 'nullable|array',
             'drawings.*'  => 'nullable|file|mimes:pdf,jpg,jpeg,png',
@@ -264,17 +265,25 @@ class ProjectController extends Controller
             ? $request->file('image')->store('projects', 'public')
             : null;
 
-        $project = Project::create([
-            'title'        => $request->title,
-            'description'  => $request->description,
-            'site_number'  => $request->site_number,
-            'timezone'     => $request->timezone,
-            'address'      => $request->address,
-            'location'     => $request->location,
-            'measurement'  => $request->measurement,
-            'created_by'   => auth()->id(),
-            'image_path'   => $imagePath,
-        ]);
+        // Build payload and only include 'revision' if the column exists
+        $payload = [
+            'title'       => $request->title,
+            'description' => $request->description,
+            'site_number' => $request->site_number,
+            'timezone'    => $request->timezone,
+            'address'     => $request->address,
+            'location'    => $request->location,
+            'measurement' => $request->measurement,
+            'created_by'  => auth()->id(),
+        ];
+
+        if (\Illuminate\Support\Facades\Schema::hasColumn('projects', 'revision')) {
+            $payload['revision'] = $request->input('revision');
+        }
+
+        $payload['image_path'] = $imagePath;
+
+        $project = Project::create($payload);
 
         // Save floor plan drawings
         if ($request->hasFile('drawings')) {
@@ -297,12 +306,13 @@ class ProjectController extends Controller
        
         $request->validate([
             'title'       => 'sometimes|string|max:255',
+            'revision'    => 'nullable|string|max:100',
             'image'       => 'nullable|image',
             'drawings'    => 'nullable|array',
             'drawings.*'  => 'nullable|file|mimes:pdf,jpg,jpeg,png',
         ]);
 
-        $project->update($request->only([
+        $updatePayload = $request->only([
             'title',
             'description',
             'site_number',
@@ -310,7 +320,13 @@ class ProjectController extends Controller
             'address',
             'location',
             'measurement',
-        ]));
+        ]);
+
+        if (\Illuminate\Support\Facades\Schema::hasColumn('projects', 'revision')) {
+            $updatePayload['revision'] = $request->input('revision');
+        }
+
+        $project->update($updatePayload);
 
         // Replace main project image
         if ($request->file('image')) {

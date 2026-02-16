@@ -52,7 +52,7 @@ return [
     |
     */
 
-    'url' => env('APP_URL', 'https://katchap.com'),
+    'url' => env('APP_URL', 'http://katchap.com'),
 
     /*
     |--------------------------------------------------------------------------

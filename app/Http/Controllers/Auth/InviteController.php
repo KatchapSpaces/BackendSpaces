@@ -157,7 +157,7 @@ class InviteController extends Controller
                 ->notify(new InviteUserNotification($token, $email, $role, $name, $providedPassword));
         } catch (\Exception $e) {
             Log::error('Failed to send invite: ' . $e->getMessage());
-            Log::info('Activation URL: ' . env('APP_URL', 'https://katchap.com') . '/activate?token=' . $token);
+            Log::info('Activation URL: ' . env('APP_URL', 'http://katchap.com') . '/activate?token=' . $token);
         }
 
         return response()->json([

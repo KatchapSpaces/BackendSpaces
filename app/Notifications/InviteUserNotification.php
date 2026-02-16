@@ -33,7 +33,7 @@ class InviteUserNotification extends Notification
     public function toMail($notifiable)
     {
         // Use frontend URL for activation since the user needs to go to the frontend page
-        $activationUrl = 'https://katchap.com/activate?token=' . $this->token;
+        $activationUrl = 'http://katchap.com/activate?token=' . $this->token;
 
         $mail = (new MailMessage)
             ->subject('Welcome to KATCHAP')
