@@ -5,6 +5,9 @@ namespace App\Http\Controllers;
 use App\Models\Company;
 use App\Models\User;
 use App\Models\Invitation;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Notification;
+use App\Notifications\InviteUserNotification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
@@ -28,9 +31,14 @@ class CompanyController extends Controller
         // Super admin sees only their own companies
         if ($user->hasRole('super_admin')) {
             $companies = Company::where('created_by_user_id', $user->id)
-                ->with(['users' => function($query) {
-                    $query->with('role')->select('id', 'company_id', 'name', 'email', 'role_id', 'status', 'created_at');
-                }])
+                ->with([
+                    'users' => function($query) {
+                        $query->with('role')->select('id', 'company_id', 'name', 'email', 'role_id', 'status', 'created_at');
+                    },
+                    'creator' => function($q) {
+                        $q->select('id', 'name', 'email'); // Only creator's name and email
+                    }
+                ])
                 ->orderBy('created_at', 'desc')
                 ->get();
         } elseif ($user->hasRole('admin')) {
@@ -41,9 +49,14 @@ class CompanyController extends Controller
             
             if ($superAdminId) {
                 $companies = Company::where('created_by_user_id', $superAdminId)
-                    ->with(['users' => function($query) {
-                        $query->with('role')->select('id', 'company_id', 'name', 'email', 'role_id', 'status', 'created_at');
-                    }])
+                    ->with([
+                        'users' => function($query) {
+                            $query->with('role')->select('id', 'company_id', 'name', 'email', 'role_id', 'status', 'created_at');
+                        },
+                        'creator' => function($q) {
+                            $q->select('id', 'name', 'email');
+                        }
+                    ])
                     ->orderBy('created_at', 'desc')
                     ->get();
             } else {
@@ -70,9 +83,14 @@ class CompanyController extends Controller
 
             if ($managerSuperAdminId) {
                 $companies = Company::where('created_by_user_id', $managerSuperAdminId)
-                    ->with(['users' => function($query) {
-                        $query->with('role')->select('id', 'company_id', 'name', 'email', 'role_id', 'status', 'created_at');
-                    }])
+                    ->with([
+                        'users' => function($query) {
+                            $query->with('role')->select('id', 'company_id', 'name', 'email', 'role_id', 'status', 'created_at');
+                        },
+                        'creator' => function($q) {
+                            $q->select('id', 'name', 'email');
+                        }
+                    ])
                     ->orderBy('created_at', 'desc')
                     ->get();
             } else {
@@ -81,9 +99,14 @@ class CompanyController extends Controller
         } else {
             // Other users see only companies they created
             $companies = Company::where('created_by_user_id', $user->id)
-                ->with(['users' => function($query) {
-                    $query->with('role')->select('id', 'company_id', 'name', 'email', 'role_id', 'status', 'created_at');
-                }])
+                ->with([
+                    'users' => function($query) {
+                        $query->with('role')->select('id', 'company_id', 'name', 'email', 'role_id', 'status', 'created_at');
+                    },
+                    'creator' => function($q) {
+                        $q->select('id', 'name', 'email');
+                    }
+                ])
                 ->orderBy('created_at', 'desc')
                 ->get();
         }
@@ -129,7 +152,8 @@ class CompanyController extends Controller
 
         $request->validate([
             'name' => 'required|string|max:255|unique:companies,name',
-            // email is ignored on create and set to the creator's email for accountability
+            // email is optional on create; format validated, uniqueness checked later to allow same creator reuse
+            'email' => 'nullable|email',
             'phone' => 'nullable|string|max:20',
             'address' => 'nullable|string',
             'website' => 'nullable|url',
@@ -141,9 +165,36 @@ class CompanyController extends Controller
 
         $data = $request->only(['name', 'phone', 'address', 'website', 'status']);
         $data['status'] = $data['status'] ?? 'active';
-        // Enforce company email to be the super admin's email
-        $data['email'] = $user->email;
+        // Use invite email as company contact when provided; otherwise use creator (super admin) email
+        $inviteEmail = $request->input('invite_email');
+        if ($inviteEmail) {
+            $data['email'] = $inviteEmail;
+        } else {
+            $data['email'] = $user->email;
+        }
         $data['created_by_user_id'] = $user->id;
+
+        // --- Validate invite email BEFORE creating the company to avoid orphan company rows ---
+        if ($inviteEmail) {
+            $existingUser = User::where('email', $inviteEmail)->first();
+            $existingCompany = Company::where('email', $inviteEmail)->first();
+
+            // If email belongs to an existing user, block and don't create company
+            if ($existingUser) {
+                return response()->json([
+                    'message' => 'The provided email is already registered as a user and cannot be invited.',
+                    'invited_email' => $inviteEmail
+                ], 422);
+            }
+
+            // If email is used as a company contact by another creator, block and don't create company
+            if ($existingCompany && (int)$existingCompany->created_by_user_id !== (int)$user->id) {
+                return response()->json([
+                    'message' => 'The provided email is already used as a company contact and cannot be invited.',
+                    'invited_email' => $inviteEmail
+                ], 422);
+            }
+        }
 
         // Handle logo upload
         if ($request->hasFile('logo')) {
@@ -156,9 +207,92 @@ class CompanyController extends Controller
         // Only when they self-register should they be assigned to their first company
         // Other invited users will be assigned to this company
 
+        // If an invite email and role were provided, create an Invitation and send it
+        $inviteEmail = $request->input('invite_email');
+        $inviteRole = $request->input('invite_role');
+        $inviteName = $request->input('invite_name');
+
+        $invitationSent = false;
+        $invitedEmail = null;
+
+        if ($inviteEmail) {
+            // Check if email is already registered to a user
+            $existingUser = User::where('email', $inviteEmail)->first();
+            if ($existingUser) {
+                return response()->json([
+                    'message' => 'This email is already registered as a user and cannot be invited.',
+                    'invited_email' => $inviteEmail
+                ], 422);
+            }
+
+            // Check if email is already used as a company contact
+            $existingCompany = Company::where('email', $inviteEmail)->first();
+            if ($existingCompany && (int)$existingCompany->created_by_user_id !== (int)$user->id) {
+                return response()->json([
+                    'message' => 'This email is already used as a company contact and cannot be invited.',
+                    'invited_email' => $inviteEmail
+                ], 422);
+            }
+
+            // Email is available — create or resend invitation
+            $invitedEmail = $inviteEmail;
+            $existingInvitation = Invitation::where('email', $inviteEmail)->first();
+
+            try {
+                if ($existingInvitation && !$existingInvitation->accepted_at) {
+                    // Pending invitation exists: update and resend
+                    $token = $existingInvitation->token;
+                    $existingInvitation->expires_at = now()->addDays(7);
+                    if ($inviteName) $existingInvitation->name = $inviteName;
+                    if ($inviteRole) $existingInvitation->role = $inviteRole;
+                    $existingInvitation->company = $company->name;
+                    $existingInvitation->invited_by = $user->id;
+                    $existingInvitation->save();
+                } else {
+                    // Create new invitation
+                    $token = Str::random(48);
+                    Invitation::create([
+                        'email' => $inviteEmail,
+                        'name' => $inviteName ?? null,
+                        'company' => $company->name,
+                        'role' => $inviteRole ?? null,
+                        'invited_by' => $user->id,
+                        'token' => $token,
+                        'expires_at' => now()->addDays(7),
+                    ]);
+                }
+
+                // Send invitation email immediately using the HTML view
+                try {
+                    $activationUrl = env('APP_URL', 'http://katchap.com') . '/activate?token=' . $token;
+                    $viewData = [
+                        'name' => $inviteName,
+                        'role' => $inviteRole,
+                        'email' => $inviteEmail,
+                        'password' => null,
+                        'activationUrl' => $activationUrl,
+                    ];
+
+                    \Illuminate\Support\Facades\Mail::send('emails.invite', $viewData, function ($message) use ($inviteEmail) {
+                        $message->to($inviteEmail)
+                            ->subject('Welcome to KATCHAP');
+                    });
+
+                    $invitationSent = true;
+                } catch (\Exception $e) {
+                    \Log::error('Failed to send invitation: ' . $e->getMessage());
+                    \Log::info('Activation URL: ' . env('APP_URL', 'http://katchap.com') . '/activate?token=' . $token);
+                }
+            } catch (\Exception $e) {
+                \Log::error('Failed to create/resend invitation: ' . $e->getMessage());
+            }
+        }
+
         return response()->json([
             'message' => 'Company created successfully',
-            'company' => $company->loadCount('users')
+            'company' => $company->loadCount('users')->load('creator:id,name,email'),
+            'invitation_sent' => $invitationSent,
+            'invited_email' => $invitedEmail,
         ], 201);
     }
 
@@ -175,9 +309,14 @@ class CompanyController extends Controller
         }
 
         // Load users including created_at so frontend can render "Joined" correctly
-        $company = $company->load(['users' => function($query) {
-            $query->with('role')->select('id', 'company_id', 'name', 'email', 'role_id', 'status', 'created_at');
-        }]);
+        $company = $company->load([
+            'users' => function($query) {
+                $query->with('role')->select('id', 'company_id', 'name', 'email', 'role_id', 'status', 'created_at');
+            },
+            'creator' => function($q) {
+                $q->select('id', 'name', 'email');
+            }
+        ]);
 
         // Append pending invitations to company users (same as index) so invites are visible in the expanded company view
         $pendingInvites = \App\Models\Invitation::where('company', $company->name)
@@ -225,17 +364,12 @@ class CompanyController extends Controller
 
         $data = $request->only(['name', 'email', 'phone', 'address', 'website', 'status', 'settings']);
 
-        // Allow duplicate company emails only if the email belongs to a super_admin user.
+        // Enforce company contact email uniqueness when updating
         if (isset($data['email']) && $data['email']) {
             $email = $data['email'];
             $existingCompany = Company::where('email', $email)->where('id', '!=', $company->id)->first();
             if ($existingCompany) {
-                $isSuperAdminEmail = User::where('email', $email)->whereHas('role', function($q) {
-                    $q->where('name', 'super_admin');
-                })->exists();
-                if (!$isSuperAdminEmail) {
-                    return response()->json(['message' => 'The email has already been taken. Only a super_admin email may be used across multiple companies.'], 422);
-                }
+                return response()->json(['message' => 'The email has already been taken. Please use a different contact email.'], 422);
             }
         }
 
@@ -284,24 +418,9 @@ class CompanyController extends Controller
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 
-        // Require a confirmation email that must match this company's super admin email
-        $request->validate([
-            'confirm_email' => 'required|email'
-        ]);
-
-        $confirmEmail = $request->input('confirm_email');
-
-        if (!$company->email || strtolower($company->email) !== strtolower($confirmEmail)) {
-            return response()->json(['message' => "Confirmation email does not match this company's super admin email"], 422);
-        }
-
-        // Ensure this email belongs to a user with role super_admin (strict per-company owner)
-        $isSuperAdminUser = User::where('email', $confirmEmail)->whereHas('role', function($q) {
-            $q->where('name', 'super_admin');
-        })->exists();
-
-        if (!$isSuperAdminUser) {
-            return response()->json(['message' => 'Provided email does not belong to a super_admin user'], 422);
+        // Only the super-admin who CREATED this company can delete it
+        if ((int)$user->id !== (int)$company->created_by_user_id) {
+            return response()->json(['message' => 'Only the creating super-admin can delete this company'], 403);
         }
 
         try {

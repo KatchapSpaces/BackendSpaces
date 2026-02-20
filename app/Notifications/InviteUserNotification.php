@@ -32,25 +32,17 @@ class InviteUserNotification extends Notification
 
     public function toMail($notifiable)
     {
-        // Use frontend URL for activation since the user needs to go to the frontend page
-        $activationUrl = 'http://katchap.com/activate?token=' . $this->token;
+        $activationUrl = env('APP_URL', 'http://katchap.com') . '/activate?token=' . $this->token;
 
-        $mail = (new MailMessage)
+        // Use a custom HTML view for a more unique invitation style
+        return (new MailMessage)
             ->subject('Welcome to KATCHAP')
-            ->greeting('Hello' . ($this->name ? ' ' . $this->name : '') . '!')
-            ->line('You have been invited to join KATCHAP as a ' . ucfirst(str_replace('_', ' ', $this->role ?? 'user')) . '.')
-            ->line('Your temporary credentials:')
-            ->line('Email: ' . $this->email)
-            ->line('Password: ' . ($this->password ?? '(you will set this when activating)'))
-            ->line('You can either activate your account (set a new password) or use these credentials to log in:')
-            ->action('Activate / Login', $activationUrl)
-            ->line('Important: This invitation link will expire in 7 days.')
-            ->line('If the button doesn\'t work, you can copy and paste this link into your browser:')
-            ->line($activationUrl)
-            ->line('If you have any questions, please contact your administrator.')
-            ->salutation('Best regards,')
-            ->salutation('The KATCHAP Team');
-
-        return $mail;
+            ->view('emails.invite', [
+                'name' => $this->name,
+                'role' => $this->role,
+                'email' => $this->email,
+                'password' => $this->password,
+                'activationUrl' => $activationUrl,
+            ]);
     }
 }
